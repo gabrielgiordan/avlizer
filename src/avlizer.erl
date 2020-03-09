@@ -44,21 +44,16 @@ maybe_put_schema_registry_url(Map) ->
   end.
 
 maybe_put_schema_registry_auth(Map) ->
-  SchemaRegistryAuthMechanism = osenv("AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_MECHANISM", false),
-  SchemaRegistryAuthUsername = osenv("AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_USERNAME", false),
-  SchemaRegistryAuthPassword = osenv("AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_PASSWORD", false),
-
-  Auth = {maybe_string_to_atom(SchemaRegistryAuthMechanism), SchemaRegistryAuthUsername, SchemaRegistryAuthPassword},
-
-  Map0 = case lists:member(false, tuple_to_list(Auth)) of
-    true -> Map;
-    false -> maps:put(schema_registry_auth, Auth, Map)
-  end,
-  
-  maybe_read_auth_file(Map0).
-
-maybe_string_to_atom(false) -> false;
-maybe_string_to_atom(Env) -> list_to_atom(Env).
+  case osenv_all([
+   "AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_MECHANISM",
+   "AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_USERNAME",
+   "AVLIZER_CONFLUENT_SCHEMAREGISTRY_AUTH_PASSWORD"
+  ], false) of
+    [Mechanism, Username, Password] -> 
+      maps:put(schema_registry_auth, {list_to_atom(Mechanism), Username, Password}, Map);
+    false -> 
+      maybe_read_auth_file(Map)
+  end.
 
 maybe_read_auth_file(#{schema_registry_auth := {_Mechanism, File}} = Vars) ->
   case file:read_file(File) of
@@ -68,7 +63,7 @@ maybe_read_auth_file(#{schema_registry_auth := {_Mechanism, File}} = Vars) ->
 maybe_read_auth_file(Vars) -> Vars.
 
 maybe_read_auth_file(#{schema_registry_auth := {Mechanism, File}} = Vars, Binary) ->
-  Lines = binary:split(Binary, <<"\n">>),
+  Lines = binary:split(Binary, <<"\n">>, [trim_all, global]),
   case Lines of
     [Username, Password] -> 
       Auth = {Mechanism, binary_to_list(Username), binary_to_list(Password)},
@@ -76,6 +71,24 @@ maybe_read_auth_file(#{schema_registry_auth := {Mechanism, File}} = Vars, Binary
     _Malformed -> 
       error_logger:error_msg("Malformed authorization file ~s", [File]),
       Vars
+  end.
+
+osenv_all(Names, Default) ->
+  {Values, Unset} = lists:foldr(fun (Name, {Values, Unset}) -> 
+    case osenv(Name, false) of
+      false -> {Values, [Name | Unset]};
+      Value -> {[Value | Values], Unset}
+    end
+  end, {[], []}, Names),
+
+  case length(Unset) of
+    0 -> 
+      Values;
+    UnsetLength when UnsetLength == length(Names) -> 
+      Default;
+    _UnsetLength -> 
+      error_logger:error_msg("Some environment variables aren't set: ~p", [Unset]),
+      Default
   end.
 
 osenv(Name, Default) ->

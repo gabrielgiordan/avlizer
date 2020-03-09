@@ -304,17 +304,15 @@ terminate(_Reason, _State) ->
 %%%_* Internals ================================================================
 
 get_registry_base_request() ->
-  case application:get_env(?APPLICATION, ?MODULE) of
-    {ok, #{schema_registry_url := URL, schema_registry_auth := Auth}} -> 
-      {URL, get_registry_headers(Auth)};
-    {ok, #{schema_registry_url := URL}} -> 
-      {URL, get_registry_headers()}
+  {ok, Cfg} = application:get_env(?APPLICATION, ?MODULE),
+  URL = maps:get(schema_registry_url, Cfg),
+  case maps:get(schema_registry_auth, Cfg, false) of
+    false -> {URL, []};
+    Auth -> {URL, [get_registry_auth(Auth)]}
   end.
 
-get_registry_headers({basic, Username, Password}) -> 
-  [{"Authorization", "Basic " ++ base64:encode_to_string(Username ++ ":" ++ Password)}];
-get_registry_headers(_Any) -> get_registry_headers().
-get_registry_headers() -> [].
+get_registry_auth({basic, Username, Password}) -> 
+  {"Authorization", "Basic " ++ base64:encode_to_string(Username ++ ":" ++ Password)}.
 
 download(Ref) ->
   gen_server:call(?SERVER, {download, Ref}, infinity).
@@ -359,7 +357,6 @@ unify_ref({Name, Fp}) when is_list(Fp) ->
   unify_ref({Name, iolist_to_binary(Fp)});
 unify_ref(Ref) -> Ref.
 
--spec do_download({string(), string()}, ref()) -> {ok, binary()} | {error, any()}.
 do_download({SchemaRegistryURL, SchemaRegistryHeaders}, RegId) when is_integer(RegId) ->
   URL = SchemaRegistryURL ++ "/schemas/ids/" ++ integer_to_list(RegId),
   httpc_download({URL, SchemaRegistryHeaders});
